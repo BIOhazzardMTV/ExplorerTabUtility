@@ -1,22 +1,16 @@
-name: Build, Sign and Release
+name: Build and Release
 
 on:
   push:
     tags:
-      - 'v*' # Triggers on tags like v1.3.0
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version string to use (e.g., v1.0.0)'
+        description: 'Release tag (e.g., v2.5.1)'
         required: true
-        type: string
-        default: 'v2.4.0-test'
 
 env:
-  PROJECT_NAME: ExplorerTabUtility
-  SIGNPATH_ORG_ID: c35b3bd9-3451-4e24-b4e0-332e901290bf
-  SIGNPATH_PROJECT_SLUG: ExplorerTabUtility
-  SIGNPATH_POLICY_SLUG: release-signing
   VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
@@ -24,21 +18,16 @@ jobs:
     runs-on: windows-2025-vs2026
     strategy:
       matrix:
-        framework: [ 'net10.0-windows', 'net481' ]
-        arch: [ 'x64', 'x86', 'arm64' ]
-      fail-fast: true
-      max-parallel: 6
+        framework: [net10.0-windows, net481]
+        arch: [x64, arm64]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup MSBuild Environments
-        uses: microsoft/setup-msbuild@v2
+      - uses: microsoft/setup-msbuild@v2
         with:
           vs-version: '[18.0,19.0)'
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+      - uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 10.0.x
 
@@ -51,194 +40,91 @@ jobs:
           & "tests/ExplorerTabUtility.Regression/bin/Release/${{ matrix.framework }}/ExplorerTabUtility.Regression.exe"
           exit $LASTEXITCODE
 
-      - name: Build Project
-        run: |
-          $outputDir = "../publish/${{ matrix.framework }}/${{ matrix.arch }}"
-          msbuild "${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.csproj" /restore /t:Publish /p:Configuration=Release /p:TargetFramework=${{ matrix.framework }} /p:RuntimeIdentifier=win-${{ matrix.arch }} /p:PublishDir=$outputDir /p:DebugType=none
+      - name: Publish and zip portable build
+        id: package
         shell: pwsh
-
-      - name: Zip Artifacts
-        id: zip_artifacts
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          $frameworkName = if ("${{ matrix.framework }}" -eq "net10.0-windows") { "Net10.0_FrameworkDependent" } else { "NetFW4.8.1" }
-          $zipName = "${{ env.PROJECT_NAME }}_${{ env.VERSION }}_${{ matrix.arch }}_${frameworkName}.zip"
-          
-          # Create a temporary directory with PROJECT_NAME as the root
-          $tempDir = "temp-$(New-Guid)"
-          New-Item -Path "$tempDir/${{ env.PROJECT_NAME }}" -ItemType Directory -Force | Out-Null
-          
-          # Copy published files into PROJECT_NAME subdirectory
-          Copy-Item -Path "publish/${{ matrix.framework }}/${{ matrix.arch }}/*" -Destination "$tempDir/${{ env.PROJECT_NAME }}" -Recurse
-          
-          # Compress the entire temp directory (includes PROJECT_NAME folder)
-          Compress-Archive -Path "$tempDir/*" -DestinationPath $zipName
-          
-          # Clean up temporary directory
-          Remove-Item -Path $tempDir -Recurse -Force
-          
-          echo "zipName=$zipName" >> $env:GITHUB_OUTPUT
-        shell: pwsh
+          if ($env:VERSION -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?$') {
+            throw 'Expected a release tag such as v2.5.1.'
+          }
+          $output = Join-Path $env:RUNNER_TEMP "publish/$env:FRAMEWORK/$env:ARCH/ExplorerTabUtility"
+          msbuild ExplorerTabUtility/ExplorerTabUtility.csproj /restore /t:Publish /p:Configuration=Release "/p:TargetFramework=$env:FRAMEWORK" "/p:RuntimeIdentifier=win-$env:ARCH" "/p:PublishDir=$output" "/p:Version=$($env:VERSION.Substring(1))" /p:DebugType=none
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $flavor = if ($env:FRAMEWORK -eq 'net10.0-windows') { 'Net10.0_FrameworkDependent' } else { 'NetFW4.8.1' }
+          $zip = "ExplorerTabUtility_${env:VERSION}_${env:ARCH}_$flavor.zip"
+          Compress-Archive -LiteralPath $output -DestinationPath $zip
+          "zip=$zip" >> $env:GITHUB_OUTPUT
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.zip_artifacts.outputs.zipName }}
-          path: ${{ steps.zip_artifacts.outputs.zipName }}
-
-  sign-artifacts:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-          merge-multiple: true
-
-      - name: Upload signing bundle to GitHub
-        id: upload-unsigned-bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-bundle
-          path: ./artifacts/*.zip
-
-      - name: Submit bundle for signing
-        id: submit-signing
-        uses: signpath/github-action-submit-signing-request@v1.1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ env.SIGNPATH_ORG_ID }}
-          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ env.SIGNPATH_POLICY_SLUG }}
-          artifact-configuration-slug: multi-zip
-          github-artifact-id: ${{ steps.upload-unsigned-bundle.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: './signed-output'
-          parameters: |
-            version: "${{ env.VERSION }}"
-
-      - name: Upload signed artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: signed-artifacts
-          path: ./signed-output/*.zip
+          name: ${{ steps.package.outputs.zip }}
+          path: ${{ steps.package.outputs.zip }}
+          if-no-files-found: error
 
   build-installer:
-    needs: sign-artifacts
+    needs: build
     runs-on: windows-2025-vs2026
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download Signed Artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: signed-artifacts
           path: artifacts
+          merge-multiple: true
 
-      - name: Build Installer
+      - name: Compile installer
+        shell: pwsh
         run: |
           Get-ChildItem -LiteralPath artifacts -Filter '*.zip' -File | ForEach-Object {
             Expand-Archive -LiteralPath $_.FullName -DestinationPath (Join-Path $_.DirectoryName $_.BaseName)
           }
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-            /DMyAppVersion="${{ env.VERSION }}" `
-            /DSourceDir="..\artifacts" `
-            "installers\installer.iss"
-        shell: pwsh
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:VERSION" '/DSourceDir=..\artifacts' installers/installer.iss
+          exit $LASTEXITCODE
 
-      - name: Upload unsigned installer
-        id: upload-unsigned-installer
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PROJECT_NAME }}_${{ env.VERSION }}_Setup-unsigned
-          path: artifacts/*.exe
-
-      - name: Submit installer for signing
-        id: submit-installer-signing
-        uses: signpath/github-action-submit-signing-request@v1.1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ env.SIGNPATH_ORG_ID }}
-          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ env.SIGNPATH_POLICY_SLUG }}
-          artifact-configuration-slug: single-zip-executable
-          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: './signed-installer'
-          parameters: |
-            version: "${{ env.VERSION }}"
-
-      - name: Upload signed installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: signed-installer
-          path: ./signed-installer/*.exe
+          name: installer
+          path: artifacts/ExplorerTabUtility_${{ env.VERSION }}_Setup.exe
+          if-no-files-found: error
 
   create-release:
-    needs: [ sign-artifacts, build-installer ]
-    runs-on: windows-latest
+    needs: build-installer
+    runs-on: ubuntu-latest
     permissions:
-      contents: write       # Required to create releases
-      pull-requests: read   # Required to read PRs for changelog generation
+      contents: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Signed Artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: signed-artifacts
           path: release-artifacts
+          merge-multiple: true
 
-      - name: Download Signed Installer
-        uses: actions/download-artifact@v4
-        with:
-          name: signed-installer
-          path: release-artifacts
-
-      - name: Generate Changelog
-        id: generate_changelog
-        uses: mikepenz/release-changelog-builder-action@v5
-        with:
-          mode: "COMMIT"
-          configurationJson: |
-            {
-              "template": "#{{CHANGELOG}}",
-              "categories": [
-                {
-                    "title": "## 🚀 Feature",
-                    "labels": ["feat", "feature"]
-                },
-                {
-                    "title": "## 🐛 Fix",
-                    "labels": ["fix", "bug"]
-                },
-                {
-                    "title": "## 📜 Other",
-                    "labels": []
-                }
-              ],
-              "label_extractor": [
-                {
-                  "pattern": "^(build|chore|ci|docs|feat|fix|bug|perf|refactor|revert|style|test){1}(\\([\\w\\-\\.]+\\))?(!)?: ([\\w ])+([\\s\\S]*)",
-                  "target": "$1"
-                }
-              ]
-            }
+      - name: Verify and publish release
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.VERSION }}
-          name: ${{ env.PROJECT_NAME }} ${{ env.VERSION }}
-          draft: true
-          body: |
-            ${{ steps.generate_changelog.outputs.changelog }}
-            
-            **Note:** If you are not sure, then you probably want: [${{ env.PROJECT_NAME }}_${{ env.VERSION }}_Setup.exe](https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/${{ env.PROJECT_NAME }}_${{ env.VERSION }}_Setup.exe)
-          files: |
-            release-artifacts/*.zip
-            release-artifacts/*.exe
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $prefix = "ExplorerTabUtility_${env:VERSION}"
+          $expected = @(
+            "${prefix}_Setup.exe"
+            "${prefix}_x64_Net10.0_FrameworkDependent.zip"
+            "${prefix}_arm64_Net10.0_FrameworkDependent.zip"
+            "${prefix}_x64_NetFW4.8.1.zip"
+            "${prefix}_arm64_NetFW4.8.1.zip"
+          )
+          $assets = @(Get-ChildItem -LiteralPath release-artifacts -File)
+          if (Compare-Object $expected $assets.Name) {
+            throw 'Expected one installer and four portable builds.'
+          }
+          $notes = 'One Windows installer and four portable builds for x64 and ARM64, targeting .NET 10 or .NET Framework 4.8.1. The binaries are unsigned.'
+          gh release create $env:VERSION --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ExplorerTabUtility $env:VERSION" --notes $notes --draft @($assets.FullName)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $uploaded = gh release view $env:VERSION --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Compare-Object $expected $uploaded.assets.name) {
+            throw 'The draft does not contain the expected five assets.'
+          }
+          gh release edit $env:VERSION --repo $env:GITHUB_REPOSITORY --draft=false
+          exit $LASTEXITCODE

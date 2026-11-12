@@ -152,7 +152,7 @@ Say goodbye to cluttered desktops with multiple Explorer windows! Explorer Tab U
 
 ## 🚀 Getting Started
 
-1. Download the latest version from the [Releases](https://github.com/w4po/ExplorerTabUtility/releases) page or install it via `winget` or `choco`:
+1. Download the installer or a portable build from this fork's [Releases](https://github.com/BIOhazzardMTV/ExplorerTabUtility/releases). The fork's binaries are unsigned. The upstream version is also available through `winget` and `choco`:
     ```powershell
     winget install w4po.ExplorerTabUtility --interactive
     ```
@@ -452,7 +452,7 @@ This project makes use of the following excellent open-source packages:
 
 Special thanks to the maintainers of these packages for their excellent work!
 
-## Code Signing
+## Upstream Code Signing
 <table>
  <tbody>
   <tr>

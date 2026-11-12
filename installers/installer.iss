@@ -38,7 +38,8 @@ SetupIconFile=..\{#MyAppName}\Icon.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesInstallIn64BitMode=x64 arm64
+ArchitecturesAllowed=x64os arm64
+ArchitecturesInstallIn64BitMode=x64os arm64
 UninstallDisplayIcon={app}\{#MyAppRelativePath}
 UninstallDisplayName={#MyAppName}
 ; Older installers recorded a wildcard removal of the entire installation directory.
@@ -64,10 +65,8 @@ Name: "startupicon"; Description: "Start with Windows"; GroupDescription: "Windo
 
 [Files]
 Source: "..\LICENSE"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion
-Source: "{#SourceDir}\{#MyAppName}_{#MyAppVersion}_x86_Net{#DesktopRuntimeVersion}_FrameworkDependent\{#MyAppName}\*"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: UsePayload('x86', True)
 Source: "{#SourceDir}\{#MyAppName}_{#MyAppVersion}_x64_Net{#DesktopRuntimeVersion}_FrameworkDependent\{#MyAppName}\*"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: UsePayload('x64', True)
 Source: "{#SourceDir}\{#MyAppName}_{#MyAppVersion}_arm64_Net{#DesktopRuntimeVersion}_FrameworkDependent\{#MyAppName}\*"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: UsePayload('arm64', True)
-Source: "{#SourceDir}\{#MyAppName}_{#MyAppVersion}_x86_NetFW4.8.1\{#MyAppName}\*"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: UsePayload('x86', False)
 Source: "{#SourceDir}\{#MyAppName}_{#MyAppVersion}_x64_NetFW4.8.1\{#MyAppName}\*"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: UsePayload('x64', False)
 Source: "{#SourceDir}\{#MyAppName}_{#MyAppVersion}_arm64_NetFW4.8.1\{#MyAppName}\*"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: UsePayload('arm64', False)
 
@@ -116,9 +115,7 @@ procedure InitializeWizard;
 var
   DotNetRoot: String;
 begin
-  if not IsWin64 then
-    PayloadArchitecture := 'x86'
-  else if ProcessorArchitecture = paARM64 then
+  if ProcessorArchitecture = paARM64 then
     PayloadArchitecture := 'arm64'
   else
     PayloadArchitecture := 'x64';
