@@ -39,7 +39,10 @@ jobs:
         if: matrix.arch == 'x64' && matrix.framework == 'net10.0-windows'
         shell: pwsh
         run: |
-          msbuild ExplorerTabUtility.sln /restore /m /p:Configuration=Release /v:minimal
+          dotnet restore ExplorerTabUtility.sln /p:Configuration=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Visual Studio MSBuild is required to compile the project's COM references.
+          msbuild ExplorerTabUtility.sln /m /p:Configuration=Release /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($framework in 'net10.0-windows', 'net481') {
             & "tests/ExplorerTabUtility.Regression/bin/Release/$framework/ExplorerTabUtility.Regression.exe"
