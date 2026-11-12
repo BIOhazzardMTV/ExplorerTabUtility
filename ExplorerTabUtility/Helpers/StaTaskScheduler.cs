@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -25,16 +24,16 @@ public sealed class StaTaskScheduler : TaskScheduler, IDisposable
 
     private void Run()
     {
-        foreach (var task in _tasks.GetConsumingEnumerable())
+        try
         {
-            try
+            foreach (var task in _tasks.GetConsumingEnumerable())
             {
                 TryExecuteTask(task);
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Exception in STA thread: {ex}");
-            }
+        }
+        finally
+        {
+            lock (_tasks) _tasks.Dispose();
         }
     }
 
@@ -63,8 +62,7 @@ public sealed class StaTaskScheduler : TaskScheduler, IDisposable
 
     public void Dispose()
     {
-        _tasks.CompleteAdding();
-        _staThread.Join();
-        _tasks.Dispose();
+        // A pending Shell call can need the UI thread while it handles shutdown.
+        lock (_tasks) _tasks.CompleteAdding();
     }
 }

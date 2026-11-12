@@ -1,8 +1,11 @@
+using System;
+using System.IO;
 using System.Windows;
 using System.Threading;
 using System.Windows.Controls;
 using ExplorerTabUtility.UI.Views;
 using ExplorerTabUtility.Helpers;
+using ExplorerTabUtility.Managers;
 
 namespace ExplorerTabUtility;
 
@@ -20,6 +23,18 @@ public partial class App : Application
             base.OnStartup(e);
             SetupTooltipBehavior();
 
+            try
+            {
+                SettingsManager.Load();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                CustomMessageBox.Show($"Could not read settings. Close any program using the settings file and restart Explorer Tab Utility.\n\n{ex.Message}",
+                    Constants.AppName, icon: MessageBoxImage.Error);
+                Shutdown(1);
+                return;
+            }
+
             _ = new MainWindow();
             return;
         }
@@ -33,8 +48,14 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _mutex?.Dispose();
-        base.OnExit(e);
+        try
+        {
+            base.OnExit(e);
+        }
+        finally
+        {
+            _mutex?.Dispose();
+        }
     }
 
     private static void SetupTooltipBehavior()

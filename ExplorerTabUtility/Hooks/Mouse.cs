@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Collections.Generic;
 using System.Drawing;
@@ -13,13 +13,13 @@ public sealed class Mouse : IHook
     private int _lastClickTime;
     private Key _lastClickKey;
     private readonly LowLevelMouseHook _lowLevelMouseHook;
-    private readonly IReadOnlyCollection<HotKeyProfile> _hotkeyProfiles;
+    private readonly Func<IReadOnlyList<HotKeyProfile>> _getProfiles;
     public bool IsHookActive => _lowLevelMouseHook.IsStarted;
     public event Action<HotKeyEventArgs>? OnHotKeyProfileTriggered;
 
-    public Mouse(IReadOnlyCollection<HotKeyProfile> hotkeyProfiles)
+    public Mouse(Func<IReadOnlyList<HotKeyProfile>> getProfiles)
     {
-        _hotkeyProfiles = hotkeyProfiles;
+        _getProfiles = getProfiles;
         _lowLevelMouseHook = new LowLevelMouseHook { AddKeyboardKeys = true };
         _lowLevelMouseHook.Down += LowLevelMouseHook_Down;
     }
@@ -36,7 +36,7 @@ public sealed class Mouse : IHook
 
         bool? isFileExplorerForeground = null;
         nint handle = 0;
-        foreach (var profile in _hotkeyProfiles)
+        foreach (var profile in _getProfiles())
         {
             // Skip disabled, empty or non mouse
             if (!profile.IsMouse || !profile.IsEnabled || profile.HotKeys is null || profile.HotKeys.Length == 0)

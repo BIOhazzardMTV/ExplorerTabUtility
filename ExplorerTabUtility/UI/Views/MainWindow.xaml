@@ -1,7 +1,6 @@
 <Window x:Class="ExplorerTabUtility.UI.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="clr-namespace:ExplorerTabUtility.UI.Views"
         xmlns:managers="clr-namespace:ExplorerTabUtility.Managers"
         Title="Explorer Tab Utility"
         Width="850" Height="600"
@@ -110,9 +109,6 @@
                                 </ListBoxItem>
                                 <ListBoxItem ToolTip="Configure application settings">
                                     <TextBlock Text="&#xE713;  Preferences" VerticalAlignment="Center" />
-                                </ListBoxItem>
-                                <ListBoxItem ToolTip="About the application and support options">
-                                    <TextBlock Text="&#xE939;  About" VerticalAlignment="Center" />
                                 </ListBoxItem>
                             </ListBox>
                         </DockPanel>
@@ -226,11 +222,6 @@
                                         </StackPanel>
                                     </GroupBox>
                                 </StackPanel>
-                            </TabItem>
-
-                            <!-- About Tab -->
-                            <TabItem Header="About" Visibility="Collapsed">
-                                <local:AboutView />
                             </TabItem>
                         </TabControl>
                     </Grid>

@@ -8,7 +8,7 @@
   
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![Windows 11](https://img.shields.io/badge/Windows%2011-22H2+-blue.svg)](https://www.microsoft.com/windows/windows-11)
-  [![.NET](https://img.shields.io/badge/.NET-9.0-purple.svg)](https://dotnet.microsoft.com/download)
+  [![.NET](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/download)
   [![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.8.1-purple.svg)](https://dotnet.microsoft.com/download/dotnet-framework)
 </div>
 
@@ -164,6 +164,10 @@ Say goodbye to cluttered desktops with multiple Explorer windows! Explorer Tab U
 
     ![Menu](https://cdn.jsdelivr.net/gh/w4po/ExplorerTabUtility@master/Assets/Menu.png)
 
+The installer uses .NET 10 Desktop Runtime when it is already installed for your architecture.
+Otherwise it installs the build for .NET Framework 4.8.1 included with supported versions of Windows 11.
+To upgrade from the .NET 9 build, use the new installer or download a new portable build from Releases.
+
 ## ⚙️ Configuration
 
 > [!NOTE]
@@ -183,7 +187,7 @@ Say goodbye to cluttered desktops with multiple Explorer windows! Explorer Tab U
   ```
   %APPDATA%\ExplorerTabUtility\settings.json
   ```
-  If you need to reset to default settings, simply delete the settings.json file.
+  To reset to defaults, close the app and delete `settings.json` and `settings.json.bak` if they exist.
 </details>
 
 <details>
@@ -298,10 +302,9 @@ Each profile contains the following settings:
   - XAML-based context menu with Windows 11 iconography
   - Custom icons and hover effects for better visual feedback
 - Tab Search popup with modern styling and keyboard navigation
-- About page with developer information and support options
 
 ### Key Technologies
-- .NET 9 and .NET Framework 4.8.1
+- .NET 10 and .NET Framework 4.8.1
 - Windows COM APIs
   - Shell32 and SHDocVw interfaces
   - Native P/Invoke
@@ -403,6 +406,27 @@ Thank you to all the amazing people who support this project!
 </p>
 
 ## Contributing
+
+### Local build
+
+On Windows, install Visual Studio 2026 (18.0+) or its Build Tools,
+with the .NET desktop development workload. Install the .NET 10 SDK for the
+default target and the .NET Framework 4.8.1 targeting pack for `net481`.
+
+From the repository root in PowerShell, run:
+
+```powershell
+.\build.ps1
+.\build.ps1 -Framework net481
+```
+
+Each command builds one Release executable at
+`ExplorerTabUtility\bin\Release\<framework>\ExplorerTabUtility.exe`.
+Run it from that output folder with the accompanying files. The default
+executable requires the .NET 10 Desktop Runtime.
+
+To run the regression checks, build the solution in Visual Studio or MSBuild
+and run `tests\ExplorerTabUtility.Regression\bin\Release\<framework>\ExplorerTabUtility.Regression.exe`.
 
 Contributions are welcome! Feel free to submit issues and pull requests.
 

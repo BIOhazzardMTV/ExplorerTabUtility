@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Windows.Controls;
 using System.Collections.Generic;
+using ExplorerTabUtility.Helpers;
 using ExplorerTabUtility.Models;
 using ExplorerTabUtility.UI.Views;
 
@@ -11,7 +12,7 @@ namespace ExplorerTabUtility.Managers;
 public class ProfileManager
 {
     // Saved state (persistent)
-    private readonly List<HotKeyProfile> _savedProfiles = [];
+    private volatile HotKeyProfile[] _savedProfiles;
 
     // Temporary state (for editing)
     private readonly List<HotKeyProfile> _tempProfiles = [];
@@ -20,34 +21,29 @@ public class ProfileManager
     public event Action? KeybindingsHookStarted;
     public event Action? KeybindingsHookStopped;
 
-    public ProfileManager(Panel profilePanel)
+    public ProfileManager(Panel profilePanel, string savedProfiles)
     {
         _profilePanel = profilePanel;
 
-        LoadSavedProfiles();
+        var profiles = ReadProfiles(savedProfiles) ?? ReadProfiles(Constants.DefaultHotKeyProfiles)!;
+        _savedProfiles = profiles.ToArray();
+        _tempProfiles.AddRange(profiles.Select(profile => profile.Clone()));
         RefreshPanel();
     }
 
-    private void LoadSavedProfiles()
+    private static List<HotKeyProfile>? ReadProfiles(string json)
     {
+        if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            var profiles = JsonSerializer.Deserialize<List<HotKeyProfile>>(SettingsManager.HotKeyProfiles);
-            if (profiles == null) return;
-
-            _savedProfiles.Clear();
-            _savedProfiles.AddRange(profiles);
-
-            // Create temporary copies
-            _tempProfiles.Clear();
-            foreach (var p in _savedProfiles)
-            {
-                _tempProfiles.Add(p.Clone());
-            }
+            var profiles = JsonSerializer.Deserialize<List<HotKeyProfile>>(json);
+            return profiles != null && profiles.All(profile => profile != null &&
+                Enum.IsDefined(typeof(HotkeyScope), profile.Scope) &&
+                Enum.IsDefined(typeof(HotKeyAction), profile.Action)) ? profiles : null;
         }
-        catch
+        catch (JsonException)
         {
-            // Invalid JSON or deserialization error
+            return null;
         }
     }
 
@@ -94,45 +90,30 @@ public class ProfileManager
         if (control != null) control.IsEnabled = enabled;
     }
 
-    public IReadOnlyList<HotKeyProfile> GetProfiles() => _savedProfiles.AsReadOnly();
+    public IReadOnlyList<HotKeyProfile> GetProfiles() => _savedProfiles;
     public IEnumerable<HotKeyProfile> GetKeyboardProfiles() => _savedProfiles.Where(p => !p.IsMouse);
     public IEnumerable<HotKeyProfile> GetMouseProfiles() => _savedProfiles.Where(p => p.IsMouse);
 
-    public void SaveProfiles()
+    public void SaveProfiles(Action<string> persist)
     {
+        var profiles = _tempProfiles.Where(p => p.HotKeys is { Length: > 0 }).Select(p => p.Clone()).ToArray();
+        persist(JsonSerializer.Serialize(profiles));
+
         // Remove profiles that don't have any hotkeys
         _tempProfiles.Where(p => p.HotKeys == null || p.HotKeys.Length == 0).ToList().ForEach(RemoveProfile);
 
-        // Update saved profiles
-        _savedProfiles.Clear();
-        foreach (var profile in _tempProfiles)
-        {
-            _savedProfiles.Add(profile.Clone());
-        }
-
-        // Save to settings
-        SettingsManager.HotKeyProfiles = JsonSerializer.Serialize(_savedProfiles);
+        _savedProfiles = profiles;
     }
 
-    public void ImportProfiles(string jsonString)
+    public bool ImportProfiles(string jsonString)
     {
-        try
-        {
-            var importedList = JsonSerializer.Deserialize<List<HotKeyProfile>>(jsonString);
-            if (importedList == null) return;
+        var profiles = ReadProfiles(jsonString);
+        if (profiles == null) return false;
 
-            _tempProfiles.Clear();
-            foreach (var profile in importedList)
-            {
-                _tempProfiles.Add(profile.Clone());
-            }
-
-            RefreshPanel();
-        }
-        catch
-        {
-            // Invalid JSON or deserialization error
-        }
+        _tempProfiles.Clear();
+        _tempProfiles.AddRange(profiles);
+        RefreshPanel();
+        return true;
     }
 
     public string ExportProfiles() => JsonSerializer.Serialize(_savedProfiles);

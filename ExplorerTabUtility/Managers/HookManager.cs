@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using ExplorerTabUtility.Helpers;
 using ExplorerTabUtility.Models;
 using ExplorerTabUtility.Hooks;
@@ -17,6 +18,7 @@ public sealed class HookManager
     private readonly Keyboard _keyboardHook;
     private readonly ExplorerWatcher _windowHook;
     private readonly SynchronizationContext _syncContext;
+    private bool _disposed;
     public event Action? OnVisibilityToggled;
     public event Action? OnWindowHookToggled;
     public event Action? OnReuseTabsToggled;
@@ -27,15 +29,14 @@ public sealed class HookManager
         _syncContext = SynchronizationContext.Current!;
 
         _windowHook = new ExplorerWatcher();
-        _mouseHook = new Mouse(profileManager.GetProfiles());
-        _keyboardHook = new Keyboard(profileManager.GetProfiles());
+        _mouseHook = new Mouse(profileManager.GetProfiles);
+        _keyboardHook = new Keyboard(profileManager.GetProfiles);
 
         profileManager.KeybindingsHookStarted += KeybindingStarted;
         profileManager.KeybindingsHookStopped += KeybindingStopped;
         _keyboardHook.OnHotKeyProfileTriggered += OnHotKeyProfileTriggered;
         _mouseHook.OnHotKeyProfileTriggered += OnHotKeyProfileTriggered;
         _windowHook.OnShellInitialized += () => OnShellInitialized?.Invoke();
-        System.Windows.Application.Current.SessionEnding += (_, _) => Dispose();
     }
 
     public void StartMouseHook() => ChangeHookStatus(_mouseHook, true);
@@ -45,8 +46,22 @@ public sealed class HookManager
     public void StartWindowHook() => ChangeHookStatus(_windowHook, true);
     public void StopWindowHook() => ChangeHookStatus(_windowHook, false);
     public void SetReuseTabs(bool value) => _windowHook.SetReuseTabs(value);
+    public void SetRestorePreviousWindows(bool value) => _windowHook.SetRestorePreviousWindows(value);
 
-    private async void OnHotKeyProfileTriggered(HotKeyEventArgs e)
+    private void OnHotKeyProfileTriggered(HotKeyEventArgs e) => _syncContext.Post(async _ =>
+    {
+        if (_disposed) return;
+        try
+        {
+            await RunHotKeyAction(e);
+        }
+        catch (Exception ex) when (ex is COMException or InvalidComObjectException)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Explorer shortcut interrupted: {ex.Message}");
+        }
+    }, null);
+
+    private async Task RunHotKeyAction(HotKeyEventArgs e)
     {
         switch (e.Profile.Action)
         {
@@ -83,19 +98,19 @@ public sealed class HookManager
                 break;
 
             case HotKeyAction.ToggleReuseTabs:
-                _syncContext.Post(_ => OnReuseTabsToggled?.Invoke(), null);
+                OnReuseTabsToggled?.Invoke();
                 break;
 
             case HotKeyAction.ToggleWinHook:
-                _syncContext.Post(_ => OnWindowHookToggled?.Invoke(), null);
+                OnWindowHookToggled?.Invoke();
                 break;
 
             case HotKeyAction.ToggleVisibility:
-                _syncContext.Post(_ => OnVisibilityToggled?.Invoke(), null);
+                OnVisibilityToggled?.Invoke();
                 break;
 
             case HotKeyAction.TabSearch:
-                _syncContext.Post(_ => new TabSearchPopup(_windowHook).Show(), null);
+                new TabSearchPopup(_windowHook).Show();
                 break;
 
             case HotKeyAction.SnapRight:
@@ -199,6 +214,8 @@ public sealed class HookManager
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _keyboardHook.Dispose();
         _mouseHook.Dispose();
         _windowHook.Dispose();

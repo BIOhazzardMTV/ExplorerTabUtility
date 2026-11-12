@@ -113,14 +113,15 @@ public static class Helper
             sleepMs,
             cancellationToken);
     }
-    public static Task<T> DoUntilNotDefaultAsync<T>(Func<T> action, int timeMs = 500, int sleepMs = 20, CancellationToken cancellationToken = default)
+    public static Task<T> DoUntilNotDefaultAsync<T>(Func<T> action, int timeMs = 500, int sleepMs = 20,
+        CancellationToken cancellationToken = default, bool continueOnCapturedContext = false)
     {
         return DoUntilConditionAsync(
             action,
             result => !EqualityComparer<T?>.Default.Equals(result, default),
             timeMs,
             sleepMs,
-            cancellationToken);
+            cancellationToken, continueOnCapturedContext);
     }
     public static Task DoUntilTimeEndAsync(Func<Task> action, int timeMs = 500, int sleepMs = 20, CancellationToken cancellationToken = default)
     {
@@ -139,7 +140,8 @@ public static class Helper
             await Task.Delay(sleepMs);
         }
     }
-    public static async Task<T> DoUntilConditionAsync<T>(Func<T> action, Predicate<T> predicate, int timeMs = 500, int sleepMs = 20, CancellationToken cancellationToken = default)
+    public static async Task<T> DoUntilConditionAsync<T>(Func<T> action, Predicate<T> predicate, int timeMs = 500,
+        int sleepMs = 20, CancellationToken cancellationToken = default, bool continueOnCapturedContext = false)
     {
         var startTicks = Stopwatch.GetTimestamp();
 
@@ -149,7 +151,7 @@ public static class Helper
             if (predicate(result))
                 return result;
 
-            await Task.Delay(sleepMs);
+            await Task.Delay(sleepMs).ConfigureAwait(continueOnCapturedContext);
         }
 
         return action();
@@ -481,51 +483,5 @@ public static class Helper
     {
         var processName = Process.GetCurrentProcess().MainModule?.FileName;
         return processName is { Length: > 0 } ? processName : $"{AppDomain.CurrentDomain.FriendlyName}.exe";
-    }
-
-    public static async Task<List<SupporterInfo>> GetSupporters()
-    {
-        try
-        {
-            using var client = new System.Net.Http.HttpClient();
-            var svgContent = await client.GetStringAsync("https://cdn.jsdelivr.net/gh/w4po/sponsors/sponsors.svg");
-
-            var supporters = new List<SupporterInfo>();
-            var xmlDoc = new System.Xml.XmlDocument();
-            xmlDoc.LoadXml(svgContent);
-
-            // Find all <a> elements (supporters)
-            var linkNodes = xmlDoc.GetElementsByTagName("a");
-
-            foreach (System.Xml.XmlNode linkNode in linkNodes)
-            {
-                if (linkNode is not System.Xml.XmlElement linkElement)
-                    continue;
-
-                var href = linkElement.GetAttribute("href");
-                var id = linkElement.GetAttribute("id");
-
-                // Find the image element inside the link
-                var imageElements = linkElement.GetElementsByTagName("image");
-                if (imageElements.Count <= 0 || imageElements[0] is not System.Xml.XmlElement imageElement)
-                    continue;
-
-                var imageUrl = imageElement.GetAttribute("href");
-
-                supporters.Add(new SupporterInfo
-                {
-                    Name = string.IsNullOrWhiteSpace(id) ? "Unknown" : id,
-                    ProfileUrl = string.IsNullOrEmpty(href) ? string.Empty : href,
-                    ImageUrl = string.IsNullOrEmpty(imageUrl) ? string.Empty : imageUrl
-                });
-            }
-
-            return supporters;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Error parsing SVG: {ex.Message}");
-            return [];
-        }
     }
 }

@@ -6,7 +6,7 @@ jobs:
   publish:
     runs-on: windows-latest
     steps:
-      - uses: vedantmgoyal9/winget-releaser@main
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54
         with:
           identifier: ${{ github.repository_owner }}.${{ github.event.repository.name }}
           token: ${{ secrets.WINGET_TOKEN }}

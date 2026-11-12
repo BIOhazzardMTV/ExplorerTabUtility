@@ -5,6 +5,8 @@ VisualStudioVersion = 17.8.34309.116
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExplorerTabUtility", "ExplorerTabUtility\ExplorerTabUtility.csproj", "{F5A13696-3D58-4925-A63E-83D9495A6F0C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExplorerTabUtility.Regression", "tests\ExplorerTabUtility.Regression\ExplorerTabUtility.Regression.csproj", "{5AB20FFA-C41D-4CD8-B1D7-696845A59BC3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{F5A13696-3D58-4925-A63E-83D9495A6F0C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F5A13696-3D58-4925-A63E-83D9495A6F0C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F5A13696-3D58-4925-A63E-83D9495A6F0C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5AB20FFA-C41D-4CD8-B1D7-696845A59BC3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5AB20FFA-C41D-4CD8-B1D7-696845A59BC3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5AB20FFA-C41D-4CD8-B1D7-696845A59BC3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5AB20FFA-C41D-4CD8-B1D7-696845A59BC3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

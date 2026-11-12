@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Input;
@@ -28,7 +29,7 @@ public partial class MainWindow : Window
         Width = SettingsManager.FormSize.Width;
         Height = SettingsManager.FormSize.Height;
 
-        _profileManager = new ProfileManager(ProfilesPanel);
+        _profileManager = new ProfileManager(ProfilesPanel, SettingsManager.HotKeyProfiles);
         _hookManager = new HookManager(_profileManager);
         _notifyIconManager = new SystemTrayIcon(_profileManager, _hookManager, ShowWindow);
 
@@ -112,13 +113,8 @@ public partial class MainWindow : Window
 
     private void HideWindow(bool exit = false)
     {
-        Dispatcher.BeginInvoke(Hide);
-
-        if (CbAutoSaveProfiles.IsChecked != true) return;
-
-        _profileManager.SaveProfiles();
-        _notifyIconManager.UpdateMenuItems(autoCheckParent: !exit);
-        UpdateTrayIconVisibility(false);
+        if (CbAutoSaveProfiles.IsChecked != true || SaveProfiles(exit) || exit)
+            Dispatcher.BeginInvoke(Hide);
     }
 
     private void BtnNewProfile_Click(object? _, RoutedEventArgs __) => _profileManager.AddProfile();
@@ -132,10 +128,15 @@ public partial class MainWindow : Window
         };
 
         if (ofd.ShowDialog() != true) return;
-        var jsonString = System.IO.File.ReadAllText(ofd.FileName);
-        _profileManager.ImportProfiles(jsonString);
-        _notifyIconManager.UpdateMenuItems();
-        UpdateTrayIconVisibility(false);
+        try
+        {
+            if (_profileManager.ImportProfiles(File.ReadAllText(ofd.FileName))) return;
+            CustomMessageBox.Show(this, "The file does not contain valid shortcut profiles.", Constants.AppName, icon: MessageBoxImage.Error);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            CustomMessageBox.Show(this, $"Could not import shortcuts.\n\n{ex.Message}", Constants.AppName, icon: MessageBoxImage.Error);
+        }
     }
 
     private void BtnExport_Click(object? _, RoutedEventArgs __)
@@ -153,11 +154,26 @@ public partial class MainWindow : Window
         openFile.Write(bytes, 0, bytes.Length);
     }
 
-    private void BtnSave_Click(object? _, RoutedEventArgs __)
+    private void BtnSave_Click(object? _, RoutedEventArgs __) => SaveProfiles();
+
+    private bool SaveProfiles(bool exit = false)
     {
-        _profileManager.SaveProfiles();
-        _notifyIconManager.UpdateMenuItems();
+        try
+        {
+            _profileManager.SaveProfiles(json => SettingsManager.HotKeyProfiles = json);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (exit)
+                System.Diagnostics.Trace.TraceError($"Failed to save shortcuts: {ex.Message}");
+            else
+                CustomMessageBox.Show(this, $"Could not save shortcuts.\n\n{ex.Message}", Constants.AppName, icon: MessageBoxImage.Error);
+            return false;
+        }
+
+        _notifyIconManager.UpdateMenuItems(autoCheckParent: !exit);
         UpdateTrayIconVisibility(false);
+        return true;
     }
 
     private void CbAutoSaveProfiles_CheckedChanged(object? _, RoutedEventArgs __)
@@ -182,7 +198,10 @@ public partial class MainWindow : Window
 
     private void CbRestorePreviousWindows_CheckedChanged(object? _, RoutedEventArgs __)
     {
-        SettingsManager.RestorePreviousWindows = CbRestorePreviousWindows.IsChecked ?? false;
+        var enabled = CbRestorePreviousWindows.IsChecked == true;
+        if (SettingsManager.RestorePreviousWindows == enabled) return;
+        SettingsManager.RestorePreviousWindows = enabled;
+        _hookManager.SetRestorePreviousWindows(enabled);
     }
 
     private void CbHideTrayIcon_CheckedChanged(object? _, RoutedEventArgs __) => UpdateTrayIconVisibility(true);

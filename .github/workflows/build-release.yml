@@ -21,10 +21,10 @@ env:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     strategy:
       matrix:
-        framework: [ 'net9.0-windows', 'net481' ]
+        framework: [ 'net10.0-windows', 'net481' ]
         arch: [ 'x64', 'x86', 'arm64' ]
       fail-fast: true
       max-parallel: 6
@@ -35,12 +35,21 @@ jobs:
       - name: Setup MSBuild Environments
         uses: microsoft/setup-msbuild@v2
         with:
-          vs-version: '17.0'  # Visual Studio 2022
+          vs-version: '[18.0,19.0)'
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
+
+      - name: Run regression checks
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          msbuild tests/ExplorerTabUtility.Regression/ExplorerTabUtility.Regression.csproj /restore /p:Configuration=Release /p:TargetFramework=${{ matrix.framework }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "tests/ExplorerTabUtility.Regression/bin/Release/${{ matrix.framework }}/ExplorerTabUtility.Regression.exe"
+          exit $LASTEXITCODE
 
       - name: Build Project
         run: |
@@ -51,7 +60,7 @@ jobs:
       - name: Zip Artifacts
         id: zip_artifacts
         run: |
-          $frameworkName = if ("${{ matrix.framework }}" -eq "net9.0-windows") { "Net9.0_FrameworkDependent" } else { "NetFW4.8.1" }
+          $frameworkName = if ("${{ matrix.framework }}" -eq "net10.0-windows") { "Net10.0_FrameworkDependent" } else { "NetFW4.8.1" }
           $zipName = "${{ env.PROJECT_NAME }}_${{ env.VERSION }}_${{ matrix.arch }}_${frameworkName}.zip"
           
           # Create a temporary directory with PROJECT_NAME as the root
@@ -116,7 +125,7 @@ jobs:
 
   build-installer:
     needs: sign-artifacts
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -127,13 +136,11 @@ jobs:
           name: signed-artifacts
           path: artifacts
 
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
-        shell: pwsh
-
       - name: Build Installer
         run: |
-          # Run Inno Setup Compiler with output directly to artifacts folder
+          Get-ChildItem -LiteralPath artifacts -Filter '*.zip' -File | ForEach-Object {
+            Expand-Archive -LiteralPath $_.FullName -DestinationPath (Join-Path $_.DirectoryName $_.BaseName)
+          }
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             /DMyAppVersion="${{ env.VERSION }}" `
             /DSourceDir="..\artifacts" `

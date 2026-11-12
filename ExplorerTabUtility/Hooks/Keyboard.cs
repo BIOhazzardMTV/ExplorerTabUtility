@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Collections.Generic;
 using H.Hooks;
@@ -10,13 +10,13 @@ namespace ExplorerTabUtility.Hooks;
 public sealed class Keyboard : IHook
 {
     private readonly LowLevelKeyboardHook _lowLevelKeyboardHook;
-    private readonly IReadOnlyCollection<HotKeyProfile> _hotkeyProfiles;
+    private readonly Func<IReadOnlyList<HotKeyProfile>> _getProfiles;
     public bool IsHookActive => _lowLevelKeyboardHook.IsStarted;
     public event Action<HotKeyEventArgs>? OnHotKeyProfileTriggered;
 
-    public Keyboard(IReadOnlyCollection<HotKeyProfile> hotkeyProfiles)
+    public Keyboard(Func<IReadOnlyList<HotKeyProfile>> getProfiles)
     {
-        _hotkeyProfiles = hotkeyProfiles;
+        _getProfiles = getProfiles;
         _lowLevelKeyboardHook = new LowLevelKeyboardHook { Handling = true };
         _lowLevelKeyboardHook.Down += LowLevelKeyboardHook_Down;
     }
@@ -31,7 +31,7 @@ public sealed class Keyboard : IHook
 
         bool? isFileExplorerForeground = null;
         nint handle = 0;
-        foreach (var profile in _hotkeyProfiles)
+        foreach (var profile in _getProfiles())
         {
             // Skip disabled, empty or mouse
             if (!profile.IsEnabled || profile.IsMouse || profile.HotKeys is null || profile.HotKeys.Length == 0)
