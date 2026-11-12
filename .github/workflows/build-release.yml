@@ -9,9 +9,14 @@ on:
       version:
         description: 'Release tag (e.g., v2.5.1)'
         required: true
+      publish:
+        description: 'Publish the release after verifying all five assets'
+        type: boolean
+        default: true
 
 env:
-  VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+  # MSBuild imports environment variables as properties, so keep the tag separate from Version.
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
   build:
@@ -49,14 +54,14 @@ jobs:
           FRAMEWORK: ${{ matrix.framework }}
           ARCH: ${{ matrix.arch }}
         run: |
-          if ($env:VERSION -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?$') {
+          if ($env:RELEASE_TAG -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?$') {
             throw 'Expected a release tag such as v2.5.1.'
           }
           $output = Join-Path $env:RUNNER_TEMP "publish/$env:FRAMEWORK/$env:ARCH/ExplorerTabUtility"
-          msbuild ExplorerTabUtility/ExplorerTabUtility.csproj /restore /t:Publish /p:Configuration=Release "/p:TargetFramework=$env:FRAMEWORK" "/p:RuntimeIdentifier=win-$env:ARCH" "/p:PublishDir=$output" "/p:Version=$($env:VERSION.Substring(1))" /p:DebugType=none
+          msbuild ExplorerTabUtility/ExplorerTabUtility.csproj /restore /t:Publish /p:Configuration=Release "/p:TargetFramework=$env:FRAMEWORK" "/p:RuntimeIdentifier=win-$env:ARCH" "/p:PublishDir=$output" "/p:Version=$($env:RELEASE_TAG.Substring(1))" /p:DebugType=none
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $flavor = if ($env:FRAMEWORK -eq 'net10.0-windows') { 'Net10.0_FrameworkDependent' } else { 'NetFW4.8.1' }
-          $zip = "ExplorerTabUtility_${env:VERSION}_${env:ARCH}_$flavor.zip"
+          $zip = "ExplorerTabUtility_${env:RELEASE_TAG}_${env:ARCH}_$flavor.zip"
           Compress-Archive -LiteralPath $output -DestinationPath $zip
           "zip=$zip" >> $env:GITHUB_OUTPUT
 
@@ -83,13 +88,13 @@ jobs:
           Get-ChildItem -LiteralPath artifacts -Filter '*.zip' -File | ForEach-Object {
             Expand-Archive -LiteralPath $_.FullName -DestinationPath (Join-Path $_.DirectoryName $_.BaseName)
           }
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:VERSION" '/DSourceDir=..\artifacts' installers/installer.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:RELEASE_TAG" '/DSourceDir=..\artifacts' installers/installer.iss
           exit $LASTEXITCODE
 
       - uses: actions/upload-artifact@v4
         with:
           name: installer
-          path: artifacts/ExplorerTabUtility_${{ env.VERSION }}_Setup.exe
+          path: artifacts/ExplorerTabUtility_${{ env.RELEASE_TAG }}_Setup.exe
           if-no-files-found: error
 
   create-release:
@@ -107,8 +112,9 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
-          $prefix = "ExplorerTabUtility_${env:VERSION}"
+          $prefix = "ExplorerTabUtility_${env:RELEASE_TAG}"
           $expected = @(
             "${prefix}_Setup.exe"
             "${prefix}_x64_Net10.0_FrameworkDependent.zip"
@@ -120,13 +126,17 @@ jobs:
           if (Compare-Object $expected $assets.Name) {
             throw 'Expected one installer and four portable builds.'
           }
+          if ($env:PUBLISH -ne 'true') {
+            Write-Output 'Verified all five release assets. Publishing is disabled for this run.'
+            return
+          }
           $notes = 'One Windows installer and four portable builds for x64 and ARM64, targeting .NET 10 or .NET Framework 4.8.1. The binaries are unsigned.'
-          gh release create $env:VERSION --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ExplorerTabUtility $env:VERSION" --notes $notes --draft @($assets.FullName)
+          gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ExplorerTabUtility $env:RELEASE_TAG" --notes $notes --draft @($assets.FullName)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $uploaded = gh release view $env:VERSION --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+          $uploaded = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (Compare-Object $expected $uploaded.assets.name) {
             throw 'The draft does not contain the expected five assets.'
           }
-          gh release edit $env:VERSION --repo $env:GITHUB_REPOSITORY --draft=false
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false
           exit $LASTEXITCODE
