@@ -30,6 +30,7 @@ on:
 
 jobs:
   publish:
+    if: github.repository == 'w4po/ExplorerTabUtility'
     runs-on: windows-latest
     env:
       CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
