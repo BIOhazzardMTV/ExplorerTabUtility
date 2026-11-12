@@ -39,8 +39,19 @@ jobs:
         if: matrix.arch == 'x64' && matrix.framework == 'net10.0-windows'
         shell: pwsh
         run: |
-          dotnet restore ExplorerTabUtility.sln /p:Configuration=Release
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $restoreLog = Join-Path $env:RUNNER_TEMP 'restore.log'
+          dotnet restore ExplorerTabUtility.sln /p:Configuration=Release --verbosity diagnostic *> $restoreLog
+          $restoreExit = $LASTEXITCODE
+          if ($restoreExit -ne 0) {
+            Select-String -LiteralPath $restoreLog -Pattern 'Failed to restore|Restoring packages for|\berror\b|\bexception\b|NU[0-9]{4}|cycle|incompatible' | Select-Object -Last 80 | ForEach-Object { $_.Line }
+            $assetsPath = 'tests/ExplorerTabUtility.Regression/obj/project.assets.json'
+            if (Test-Path -LiteralPath $assetsPath) {
+              $restoreAssets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
+              $restoreAssets.project.restore | ConvertTo-Json -Depth 8
+              $restoreAssets.logs | ConvertTo-Json -Depth 8
+            }
+            exit $restoreExit
+          }
           # Visual Studio MSBuild is required to compile the project's COM references.
           msbuild ExplorerTabUtility.sln /m /p:Configuration=Release /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
