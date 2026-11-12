@@ -9,6 +9,10 @@ on:
       version:
         description: 'Release tag (e.g., v2.5.1)'
         required: true
+      publish:
+        description: 'Publish the release after verifying all five assets'
+        type: boolean
+        default: true
 
 env:
   VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
@@ -107,6 +111,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
           $prefix = "ExplorerTabUtility_${env:VERSION}"
           $expected = @(
@@ -119,6 +124,10 @@ jobs:
           $assets = @(Get-ChildItem -LiteralPath release-artifacts -File)
           if (Compare-Object $expected $assets.Name) {
             throw 'Expected one installer and four portable builds.'
+          }
+          if ($env:PUBLISH -ne 'true') {
+            Write-Output 'Verified all five release assets. Publishing is disabled for this run.'
+            return
           }
           $notes = 'One Windows installer and four portable builds for x64 and ARM64, targeting .NET 10 or .NET Framework 4.8.1. The binaries are unsigned.'
           gh release create $env:VERSION --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ExplorerTabUtility $env:VERSION" --notes $notes --draft @($assets.FullName)
