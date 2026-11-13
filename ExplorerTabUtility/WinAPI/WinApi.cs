@@ -89,6 +89,16 @@ public static class WinApi
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern nint SendMessage(nint hWnd, uint Msg, nint wParam, nint lParam);
 
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern nint SendMessageTimeout(nint hWnd, uint msg, nint wParam, nint lParam,
+        uint flags, uint timeout, out nint result);
+
+    internal static bool SendExplorerCommand(nint window, int command, int argument)
+    {
+        const uint abortIfHungOrDestroyed = 0x22;
+        return SendMessageTimeout(window, WM_COMMAND, command, argument, abortIfHungOrDestroyed, 500, out _) != 0;
+    }
+
     [return: MarshalAs(UnmanagedType.Bool)]
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     public static extern bool PostMessage(nint hWnd, uint Msg, nint wParam, nint lParam);

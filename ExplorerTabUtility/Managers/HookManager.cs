@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.IO;
+using System.ComponentModel;
 using ExplorerTabUtility.Helpers;
 using ExplorerTabUtility.Models;
 using ExplorerTabUtility.Hooks;
@@ -12,12 +14,15 @@ using ExplorerTabUtility.UI.Views;
 
 namespace ExplorerTabUtility.Managers;
 
+[Fody.ConfigureAwait(true)]
 public sealed class HookManager
 {
     private readonly Mouse _mouseHook;
     private readonly Keyboard _keyboardHook;
     private readonly ExplorerWatcher _windowHook;
     private readonly SynchronizationContext _syncContext;
+    private readonly SemaphoreSlim _shortcutQueue = new(1);
+    private readonly CancellationTokenSource _shutdown = new();
     private bool _disposed;
     public event Action? OnVisibilityToggled;
     public event Action? OnWindowHookToggled;
@@ -34,8 +39,8 @@ public sealed class HookManager
 
         profileManager.KeybindingsHookStarted += KeybindingStarted;
         profileManager.KeybindingsHookStopped += KeybindingStopped;
-        _keyboardHook.OnHotKeyProfileTriggered += OnHotKeyProfileTriggered;
-        _mouseHook.OnHotKeyProfileTriggered += OnHotKeyProfileTriggered;
+        _keyboardHook.OnHotKeyProfilesTriggered += OnHotKeyProfilesTriggered;
+        _mouseHook.OnHotKeyProfilesTriggered += OnHotKeyProfilesTriggered;
         _windowHook.OnShellInitialized += () => OnShellInitialized?.Invoke();
     }
 
@@ -48,25 +53,39 @@ public sealed class HookManager
     public void SetReuseTabs(bool value) => _windowHook.SetReuseTabs(value);
     public void SetRestorePreviousWindows(bool value) => _windowHook.SetRestorePreviousWindows(value);
 
-    private void OnHotKeyProfileTriggered(HotKeyEventArgs e) => _syncContext.Post(async _ =>
+    private void OnHotKeyProfilesTriggered(IReadOnlyList<HotKeyEventArgs> profiles) =>
+        _syncContext.Post(state => { _ = RunHotKeyChain(profiles); }, null);
+
+    private async Task RunHotKeyChain(IReadOnlyList<HotKeyEventArgs> profiles)
     {
         if (_disposed) return;
         try
         {
-            await RunHotKeyAction(e);
+            await _shortcutQueue.WaitAsync(_shutdown.Token);
+            try
+            {
+                foreach (var profile in profiles)
+                {
+                    if (profile.Profile.Delay > 0) await Task.Delay(profile.Profile.Delay, _shutdown.Token);
+                    if (_disposed) return;
+                    try { await RunHotKeyAction(profile); }
+                    catch (Exception ex) when (ex is COMException or InvalidComObjectException or IOException or Win32Exception or UnauthorizedAccessException)
+                    {
+                        System.Diagnostics.Trace.TraceWarning($"Explorer shortcut interrupted: {ex.Message}");
+                    }
+                }
+            }
+            finally { _shortcutQueue.Release(); }
         }
-        catch (Exception ex) when (ex is COMException or InvalidComObjectException)
-        {
-            System.Diagnostics.Trace.TraceWarning($"Explorer shortcut interrupted: {ex.Message}");
-        }
-    }, null);
+        catch (OperationCanceledException) when (_disposed) { }
+    }
 
     private async Task RunHotKeyAction(HotKeyEventArgs e)
     {
         switch (e.Profile.Action)
         {
             case HotKeyAction.Open:
-                await _windowHook.Open(e.Profile.Path, e.Profile.IsAsTab, e.ForegroundWindow, e.Profile.Delay);
+                await _windowHook.Open(e.Profile.Path, e.Profile.IsAsTab, e.ForegroundWindow);
                 break;
 
             case HotKeyAction.Duplicate:
@@ -117,7 +136,7 @@ public sealed class HookManager
             case HotKeyAction.SnapLeft:
             case HotKeyAction.SnapUp:
             case HotKeyAction.SnapDown:
-                await SnapForegroundWindow(e.Profile.Action, e.Profile.Delay);
+                SnapWindow(e.Profile.Action, e.Profile.Scope == HotkeyScope.FileExplorer ? e.ForegroundWindow : 0);
                 break;
 
             default:
@@ -156,13 +175,16 @@ public sealed class HookManager
             KeyboardSimulator.ModifiedKeyStroke(VirtualKey.Alt, VirtualKey.Up);
     }
 
-    private async Task SnapForegroundWindow(HotKeyAction direction, int delay = 0)
+    private static void SnapWindow(HotKeyAction direction, nint window)
     {
         var snapKey = GetSnapKey(direction);
         if (snapKey == VirtualKey.None) return;
-
-        if (delay > 0)
-            await Task.Delay(delay);
+        if (window != 0 && WinApi.GetForegroundWindow() != window)
+        {
+            if (!Helper.IsFileExplorerWindow(window)) return;
+            WinApi.RestoreWindowToForeground(window);
+            if (WinApi.GetForegroundWindow() != window) return;
+        }
 
         var inputs = new List<INPUT>();
         // Remove any currently pressed modifiers (Ctrl, Shift, Alt, Win)
@@ -216,6 +238,7 @@ public sealed class HookManager
     {
         if (_disposed) return;
         _disposed = true;
+        _shutdown.Cancel();
         _keyboardHook.Dispose();
         _mouseHook.Dispose();
         _windowHook.Dispose();

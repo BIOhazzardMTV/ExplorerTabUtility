@@ -1,7 +1,5 @@
 using System;
-using System.Threading;
 using System.Collections.Generic;
-using System.Drawing;
 using H.Hooks;
 using ExplorerTabUtility.Models;
 using ExplorerTabUtility.Helpers;
@@ -15,7 +13,7 @@ public sealed class Mouse : IHook
     private readonly LowLevelMouseHook _lowLevelMouseHook;
     private readonly Func<IReadOnlyList<HotKeyProfile>> _getProfiles;
     public bool IsHookActive => _lowLevelMouseHook.IsStarted;
-    public event Action<HotKeyEventArgs>? OnHotKeyProfileTriggered;
+    public event Action<IReadOnlyList<HotKeyEventArgs>>? OnHotKeyProfilesTriggered;
 
     public Mouse(Func<IReadOnlyList<HotKeyProfile>> getProfiles)
     {
@@ -29,13 +27,14 @@ public sealed class Mouse : IHook
 
     private void LowLevelMouseHook_Down(object? sender, MouseEventArgs e)
     {
-        var handler = OnHotKeyProfileTriggered;
+        var handler = OnHotKeyProfilesTriggered;
         if (handler == null) return;
 
         var isDoubleClick = IsDoubleClick(e.CurrentKey);
 
         bool? isFileExplorerForeground = null;
         nint handle = 0;
+        List<HotKeyEventArgs>? matches = null;
         foreach (var profile in _getProfiles())
         {
             // Skip disabled, empty or non mouse
@@ -61,18 +60,9 @@ public sealed class Mouse : IHook
                 }
             }
             
-            // Queue the hotkey trigger in a separate thread.
-#if NET7_0_OR_GREATER
-            ThreadPool.QueueUserWorkItem(static s => s.Handler.Invoke(new HotKeyEventArgs(s.Profile, s.Handle, s.Position)),
-                new State(handler, profile, handle, e.Position), false);
-#else
-            ThreadPool.QueueUserWorkItem(static state =>
-            {
-                var s = (State)state!;
-                s.Handler.Invoke(new HotKeyEventArgs(s.Profile, s.Handle, s.Position));
-            }, new State(handler, profile, handle, e.Position));
-#endif
+            (matches ??= []).Add(new HotKeyEventArgs(profile, handle, e.Position));
         }
+        if (matches != null) handler(matches);
     }
 
     private bool IsDoubleClick(Key currentKey)
@@ -92,13 +82,5 @@ public sealed class Mouse : IHook
     {
         StopHook();
         _lowLevelMouseHook.Dispose();
-    }
-
-    private readonly struct State(Action<HotKeyEventArgs> handler, HotKeyProfile profile, nint handle, Point position)
-    {
-        public readonly Action<HotKeyEventArgs> Handler = handler;
-        public readonly HotKeyProfile Profile = profile;
-        public readonly nint Handle = handle;
-        public readonly Point Position = position;
     }
 }

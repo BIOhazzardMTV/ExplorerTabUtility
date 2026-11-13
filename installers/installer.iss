@@ -12,7 +12,7 @@
 #define MyAppName "ExplorerTabUtility"
 #define MyAppExeName MyAppName + ".exe"
 #define MyAppRelativePath MyAppName + "\" + MyAppExeName
-#define MyAppURL "https://github.com/w4po/ExplorerTabUtility"
+#define MyAppURL "https://github.com/BIOhazzardMTV/ExplorerTabUtility"
 #define DesktopRuntimeVersion "10.0"
 
 ; Source directory for build artifacts
@@ -77,9 +77,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppRelativePath}"; Task
 
 [Registry]
 ; Add to startup if the startup task is selected
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: "{app}\{#MyAppRelativePath}"; Flags: uninsdeletevalue; Tasks: startupicon
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppRelativePath}"""; Tasks: startupicon
 ; Set StartupApproved registry entry (enabled = 02 00 00 00 00 00 00 00 00 00 00 00)
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"; ValueType: binary; ValueName: "{#MyAppName}"; ValueData: 02 00 00 00 00 00 00 00 00 00 00 00; Flags: uninsdeletevalue; Tasks: startupicon
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"; ValueType: binary; ValueName: "{#MyAppName}"; ValueData: 02 00 00 00 00 00 00 00 00 00 00 00; Tasks: startupicon
 
 [Run]
 ; Launch the application after installation if selected
@@ -135,18 +135,74 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  StartupCommand, InstalledExe: String;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#MyAppName}');
-    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', '{#MyAppName}');
+    InstalledExe := ExpandConstant('{app}\{#MyAppRelativePath}');
+    if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#MyAppName}', StartupCommand) and
+       ((CompareText(StartupCommand, InstalledExe) = 0) or (CompareText(StartupCommand, '"' + InstalledExe + '"') = 0)) then
+    begin
+      RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', '{#MyAppName}');
+      RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', '{#MyAppName}');
+    end;
+  end;
+end;
+
+function OpenEvent(Access: LongWord; InheritHandle: Boolean; Name: String): THandle;
+  external 'OpenEventW@kernel32.dll stdcall';
+function SetEvent(Event: THandle): Boolean;
+  external 'SetEvent@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function InstalledCopyIsRunning(const InstalledExe: String): Boolean;
+var
+  Wmi, Processes, Process: Variant;
+  Index: Integer;
+begin
+  Result := False;
+  try
+    Wmi := CreateOleObject('WbemScripting.SWbemLocator');
+    Wmi := Wmi.ConnectServer('.', 'root\cimv2');
+    Processes := Wmi.ExecQuery('SELECT ExecutablePath FROM Win32_Process WHERE Name = ''{#MyAppExeName}''');
+    for Index := 0 to Processes.Count - 1 do
+    begin
+      Process := Processes.ItemIndex(Index);
+      if not VarIsNull(Process.ExecutablePath) and (CompareText(Process.ExecutablePath, InstalledExe) = 0) then
+      begin
+        Result := True;
+        Exit;
+      end;
+    end;
+  except
+    Log('Could not check for a running copy of ' + InstalledExe + ': ' + GetExceptionMessage);
   end;
 end;
 
 function InitializeUninstall(): Boolean;
 var
-  ResultCode: Integer;
+  Name, InstalledExe: String;
+  Event: THandle;
+  Attempt: Integer;
 begin
-  Exec('taskkill.exe', '/f /im {#MyAppExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := True;
+  InstalledExe := ExpandConstant('{app}\{#MyAppRelativePath}');
+  Name := '{#MyAppName}.Close.' + Uppercase(GetSHA256OfUnicodeString(Uppercase(InstalledExe)));
+  Event := OpenEvent(2, False, Name);
+  if Event <> 0 then
+  begin
+    SetEvent(Event);
+    CloseHandle(Event);
+    for Attempt := 1 to 50 do
+    begin
+      Sleep(100);
+      Event := OpenEvent(2, False, Name);
+      if Event = 0 then Break;
+      CloseHandle(Event);
+    end;
+  end;
+  Result := (Event = 0) and not InstalledCopyIsRunning(InstalledExe);
+  if not Result then
+    SuppressibleMsgBox('Close the installed Explorer Tab Utility from the tray and retry uninstalling.', mbError, MB_OK, IDOK);
 end;

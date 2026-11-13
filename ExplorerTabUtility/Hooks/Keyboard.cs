@@ -1,5 +1,4 @@
 using System;
-using System.Threading;
 using System.Collections.Generic;
 using H.Hooks;
 using ExplorerTabUtility.Models;
@@ -12,7 +11,7 @@ public sealed class Keyboard : IHook
     private readonly LowLevelKeyboardHook _lowLevelKeyboardHook;
     private readonly Func<IReadOnlyList<HotKeyProfile>> _getProfiles;
     public bool IsHookActive => _lowLevelKeyboardHook.IsStarted;
-    public event Action<HotKeyEventArgs>? OnHotKeyProfileTriggered;
+    public event Action<IReadOnlyList<HotKeyEventArgs>>? OnHotKeyProfilesTriggered;
 
     public Keyboard(Func<IReadOnlyList<HotKeyProfile>> getProfiles)
     {
@@ -26,11 +25,12 @@ public sealed class Keyboard : IHook
 
     private void LowLevelKeyboardHook_Down(object? sender, KeyboardEventArgs e)
     {
-        var handler = OnHotKeyProfileTriggered;
+        var handler = OnHotKeyProfilesTriggered;
         if (handler == null) return;
 
         bool? isFileExplorerForeground = null;
         nint handle = 0;
+        List<HotKeyEventArgs>? matches = null;
         foreach (var profile in _getProfiles())
         {
             // Skip disabled, empty or mouse
@@ -54,32 +54,16 @@ public sealed class Keyboard : IHook
             }
 
             // Set handled value.
-            e.IsHandled = profile.IsHandled;
+            if (profile.IsHandled) e.IsHandled = true;
             
-            // Queue the hotkey trigger in a separate thread.
-#if NET7_0_OR_GREATER
-            ThreadPool.QueueUserWorkItem(static s => s.Handler.Invoke(new HotKeyEventArgs(s.Profile, s.Handle)),
-                new State(handler, profile, handle), false);
-#else
-            ThreadPool.QueueUserWorkItem(static state =>
-            {
-                var s = (State)state!;
-                s.Handler.Invoke(new HotKeyEventArgs(s.Profile, s.Handle));
-            }, new State(handler, profile, handle));
-#endif
+            (matches ??= []).Add(new HotKeyEventArgs(profile, handle));
         }
+        if (matches != null) handler(matches);
     }
 
     public void Dispose()
     {
         StopHook();
         _lowLevelKeyboardHook.Dispose();
-    }
-
-    private readonly struct State(Action<HotKeyEventArgs> handler, HotKeyProfile profile, nint handle)
-    {
-        public readonly Action<HotKeyEventArgs> Handler = handler;
-        public readonly HotKeyProfile Profile = profile;
-        public readonly nint Handle = handle;
     }
 }

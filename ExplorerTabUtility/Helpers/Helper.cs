@@ -445,6 +445,16 @@ public static class Helper
 
     public static string NormalizeLocation(string location)
     {
+        location = location.Trim().Trim('\'', '"');
+        if (Uri.TryCreate(location, UriKind.Absolute, out var uri))
+        {
+            if (uri.Scheme is "http" or "https") return location;
+            if (location.StartsWith("file:", StringComparison.OrdinalIgnoreCase) && uri.IsFile)
+                return uri.LocalPath;
+        }
+        if (location.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+            return "https://" + location;
+
         if (location.IndexOf('%') > -1)
             location = Environment.ExpandEnvironmentVariables(location);
 
@@ -453,8 +463,6 @@ public static class Helper
 
         else if (location.StartsWith("{", StringComparison.Ordinal))
             location = $"shell:::{location}";
-
-        location = location.Trim(' ', '/', '\\', '\n', '\'', '"');
 
         return location.Replace('/', '\\');
     }

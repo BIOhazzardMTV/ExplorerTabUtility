@@ -41,13 +41,8 @@ public class HotKeyActionJsonConverter : JsonConverter<HotKeyAction>
                 return mappedValue;
             }
 
-            // Fallback for values not in the mapping
             if (Enum.IsDefined(typeof(HotKeyAction), enumValue))
-            {
                 return (HotKeyAction)enumValue;
-            }
-
-            return HotKeyAction.Open; // Default value if the number is not valid
         }
 
         if (reader.TokenType == JsonTokenType.String)
@@ -56,15 +51,15 @@ public class HotKeyActionJsonConverter : JsonConverter<HotKeyAction>
             var enumString = reader.GetString()!;
 
             // Try to parse the string as an enum value
-            if (Enum.TryParse<HotKeyAction>(enumString, true, out var result))
+            if (Enum.TryParse<HotKeyAction>(enumString, true, out var result) &&
+                Enum.IsDefined(typeof(HotKeyAction), result))
             {
                 return result;
             }
 
-            return HotKeyAction.Open; // Default value if the string is not valid
         }
 
-        throw new JsonException($"Unexpected token {reader.TokenType} when parsing HotKeyAction.");
+        throw new JsonException("Unknown shortcut action.");
     }
 
     public override void Write(Utf8JsonWriter writer, HotKeyAction value, JsonSerializerOptions options)

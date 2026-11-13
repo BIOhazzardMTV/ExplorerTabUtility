@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
@@ -189,8 +190,18 @@ public partial class TabSearchPopup : Window
 
         if (result == MessageBoxResult.Yes)
         {
-            _explorerWatcher.ClearClosedWindows();
-            LoadWindows();
+            try
+            {
+                _explorerWatcher.ClearClosedWindows();
+                LoadWindows();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _isShowingDialog = true;
+                CustomMessageBox.Show(this, $"Could not clear the history.\n\n{ex.Message}", Constants.AppName,
+                    icon: MessageBoxImage.Error);
+                _isShowingDialog = false;
+            }
         }
 
         // Re-activate the window and focus the search box

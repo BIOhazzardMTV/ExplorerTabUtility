@@ -19,6 +19,12 @@ public partial class SystemTrayIcon : UserControl, IDisposable
     private readonly Action _showWindowAction;
     private ICommand ProfileItemCommand { get; set; } = null!;
     private bool _savedReuseTabsState;
+    private int _shellGeneration;
+    private bool _disposed;
+    private bool _trayRequested = true;
+    private bool _settingsSavePending;
+    internal event Action? ProfileAvailabilityChanged;
+    internal event Action? ExitRequested;
 
     public SystemTrayIcon(ProfileManager profileManager, HookManager hookManager, Action showWindowAction)
     {
@@ -37,7 +43,7 @@ public partial class SystemTrayIcon : UserControl, IDisposable
         _hookManager.OnReuseTabsToggled += HookManager_OnReuseTabsToggled;
 
         // Populate submenus for keyboard & mouse profiles
-        UpdateMenuItems(autoCheckParent: false);
+        UpdateMenuItems();
     }
 
     private void InitializeCommands()
@@ -55,24 +61,20 @@ public partial class SystemTrayIcon : UserControl, IDisposable
         AddToStartup.Command = new RelayCommand(_ => ToggleStartup());
         OpenSettings.Command = new RelayCommand(_ => _showWindowAction());
         CheckForUpdates.Command = new RelayCommand(_ => UpdateManager.CheckForUpdates());
-        ExitApplication.Command = new RelayCommand(_ => Application.Current.Shutdown());
+        ExitApplication.Command = new RelayCommand(_ => ExitRequested?.Invoke());
     }
 
-    private void HookManager_OnShellInitialized()
+    [Fody.ConfigureAwait(true)]
+    private async void HookManager_OnShellInitialized()
     {
-        // Workaround for hardcodet/wpf-notifyicon bug: repeatedly hide icon when explorer.exe restarts
-        if (TrayIcon.Visibility == Visibility.Visible) return;
-        Helper.DoUntilTimeEnd(HideTrayIcon, 7000, 1000);
-        return;
-        
-        void HideTrayIcon()
+        var generation = ++_shellGeneration;
+        // The tray library can recreate a hidden icon while Explorer is restarting.
+        for (var attempt = 0; attempt < 7 && !_disposed && generation == _shellGeneration &&
+             TrayIcon.Visibility != Visibility.Visible; attempt++)
         {
-            TrayIcon.Dispatcher.BeginInvoke(() =>
-            {
-                if (TrayIcon.Visibility == Visibility.Visible) return;
-                TrayIcon.Visibility = Visibility.Hidden;
-                TrayIcon.Visibility = Visibility.Collapsed;
-            });
+            TrayIcon.Visibility = Visibility.Hidden;
+            TrayIcon.Visibility = Visibility.Collapsed;
+            await System.Threading.Tasks.Task.Delay(1000);
         }
     }
     
@@ -107,13 +109,27 @@ public partial class SystemTrayIcon : UserControl, IDisposable
         ReuseTabs.Command.Execute(ReuseTabs.CommandParameter);
     }
 
-    public void UpdateMenuItems(bool autoCheckParent = true)
+    public void UpdateMenuItems()
     {
-        PopulateHookProfiles(KeyboardHookMenu, _profileManager.GetKeyboardProfiles(), autoCheckParent);
-        PopulateHookProfiles(MouseHookMenu, _profileManager.GetMouseProfiles(), autoCheckParent);
+        PopulateHookProfiles(KeyboardHookMenu, _profileManager.GetKeyboardProfiles());
+        PopulateHookProfiles(MouseHookMenu, _profileManager.GetMouseProfiles());
     }
 
-    public void SetTrayIconVisibility(bool visible) => TrayIcon.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+    public void SetTrayIconVisibility(bool visible)
+    {
+        _trayRequested = visible;
+        UpdateTrayVisibility();
+    }
+
+    internal void SetSettingsSaveWarning(bool pending)
+    {
+        _settingsSavePending = pending;
+        TrayIcon.ToolTipText = pending ? "Explorer Tab Utility: settings could not be saved." : Constants.NotifyIconText;
+        UpdateTrayVisibility();
+    }
+
+    private void UpdateTrayVisibility() =>
+        TrayIcon.Visibility = _trayRequested || _settingsSavePending ? Visibility.Visible : Visibility.Collapsed;
     private void OnNotifyIconDoubleClick(object sender, RoutedEventArgs _) => _showWindowAction();
 
     private void ToggleKeyboardHookMenu()
@@ -125,6 +141,7 @@ public partial class SystemTrayIcon : UserControl, IDisposable
             _hookManager.StartKeyboardHook,
             _hookManager.StopKeyboardHook
         );
+        ProfileAvailabilityChanged?.Invoke();
     }
 
     private void ToggleMouseHookMenu()
@@ -136,6 +153,7 @@ public partial class SystemTrayIcon : UserControl, IDisposable
             _hookManager.StartMouseHook,
             _hookManager.StopMouseHook
         );
+        ProfileAvailabilityChanged?.Invoke();
     }
 
     private void ToggleWindowHook()
@@ -197,7 +215,7 @@ public partial class SystemTrayIcon : UserControl, IDisposable
         AddToStartup.IsChecked = RegistryManager.IsStartupEnabled;
     }
 
-    private void PopulateHookProfiles(MenuItem parent, IEnumerable<HotKeyProfile> profiles, bool autoCheckParent = true)
+    private void PopulateHookProfiles(MenuItem parent, IEnumerable<HotKeyProfile> profiles)
     {
         parent.Items.Clear();
 
@@ -217,14 +235,6 @@ public partial class SystemTrayIcon : UserControl, IDisposable
             profileItem.CommandParameter = profileItem;
             parent.Items.Add(profileItem);
         }
-
-        var anyChecked = parent.Items.Cast<MenuItem>().Any(item => item.IsChecked);
-
-        // No subitems are checked, uncheck the parent.
-        // At least one subitem is checked, check the parent (if autoCheckParent)
-        var desiredParentChecked = anyChecked && (parent.IsChecked || autoCheckParent);
-        if (desiredParentChecked != parent.IsChecked)
-            parent.Command.Execute(parent.CommandParameter);
     }
 
     private void OnProfileItemClick(object? sender)
@@ -232,6 +242,7 @@ public partial class SystemTrayIcon : UserControl, IDisposable
         if (sender is not MenuItem { Tag: HotKeyProfile profile } item) return;
 
         _profileManager.SetProfileEnabledFromTray(profile, item.IsChecked);
+        ProfileAvailabilityChanged?.Invoke();
 
         if (item.Parent is not MenuItem { IsChecked: true } parent) return;
 
@@ -244,6 +255,7 @@ public partial class SystemTrayIcon : UserControl, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         TrayIcon.Dispose();
         GC.SuppressFinalize(this);
     }

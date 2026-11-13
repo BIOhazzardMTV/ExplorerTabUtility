@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using ExplorerTabUtility.WinAPI;
 using ExplorerTabUtility.Managers;
@@ -20,6 +21,9 @@ public partial class MainWindow : Window
     private readonly ProfileManager _profileManager;
     private readonly SystemTrayIcon _notifyIconManager;
     private nint _handle;
+    private readonly DispatcherTimer _settingsTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private Size? _pendingSize;
+    private bool _exitRequested;
 
     public MainWindow()
     {
@@ -32,9 +36,10 @@ public partial class MainWindow : Window
         _profileManager = new ProfileManager(ProfilesPanel, SettingsManager.HotKeyProfiles);
         _hookManager = new HookManager(_profileManager);
         _notifyIconManager = new SystemTrayIcon(_profileManager, _hookManager, ShowWindow);
-
-        SetupEventHandlers();
-        StartHooks();
+        _notifyIconManager.ProfileAvailabilityChanged += () => UpdateTrayIconVisibility(false);
+        _notifyIconManager.ExitRequested += RequestExit;
+        SettingsManager.SaveStatusChanged += OnSaveStatusChanged;
+        _settingsTimer.Tick += (_, _) => FlushSettings();
 
         CbAutoUpdate.IsChecked = SettingsManager.AutoUpdate;
         CbThemeIssue.IsChecked = SettingsManager.HaveThemeIssue;
@@ -42,6 +47,8 @@ public partial class MainWindow : Window
         CbAutoSaveProfiles.IsChecked = SettingsManager.SaveProfilesOnExit;
         CbSaveClosedHistory.IsChecked = SettingsManager.SaveClosedHistory;
         CbRestorePreviousWindows.IsChecked = SettingsManager.RestorePreviousWindows;
+        SetupEventHandlers();
+        StartHooks();
         UpdateTrayIconVisibility(false);
 
         if (SettingsManager.AutoUpdate)
@@ -111,9 +118,9 @@ public partial class MainWindow : Window
         WinApi.RestoreWindowToForeground(_handle);
     }
 
-    private void HideWindow(bool exit = false)
+    private void HideWindow()
     {
-        if (CbAutoSaveProfiles.IsChecked != true || SaveProfiles(exit) || exit)
+        if (CbAutoSaveProfiles.IsChecked != true || SaveProfiles())
             Dispatcher.BeginInvoke(Hide);
     }
 
@@ -171,7 +178,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        _notifyIconManager.UpdateMenuItems(autoCheckParent: !exit);
+        _notifyIconManager.UpdateMenuItems();
         UpdateTrayIconVisibility(false);
         return true;
     }
@@ -212,7 +219,7 @@ public partial class MainWindow : Window
         var profile = _profileManager
             .GetProfiles()
             .FirstOrDefault(p =>
-                p is { IsEnabled: true, Action: HotKeyAction.ToggleVisibility } &&
+                p is { IsEnabled: true, Scope: HotkeyScope.Global, Action: HotKeyAction.ToggleVisibility, HotKeys.Length: > 0 } &&
                 (p.IsMouse ? SettingsManager.IsMouseHookActive : SettingsManager.IsKeyboardHookActive));
 
         var canToggleVisibility = profile != null;
@@ -221,14 +228,15 @@ public partial class MainWindow : Window
         {
             var message = canToggleVisibility
                 ? $"You can show the app again by pressing {profile!.HotKeys!.HotKeysToString(profile.IsDoubleClick)}"
-                : "Cannot hide tray icon if no hotkey is configured to toggle visibility.";
+                : "Configure an enabled global ToggleVisibility shortcut before hiding the tray icon.";
 
             CustomMessageBox.Show(this, message, Constants.AppName);
         }
 
         var newCheckedState = canToggleVisibility && isChecked;
         CbHideTrayIcon.IsChecked = newCheckedState;
-        SettingsManager.IsTrayIconHidden = newCheckedState;
+        if (SettingsManager.IsTrayIconHidden != newCheckedState)
+            SettingsManager.IsTrayIconHidden = newCheckedState;
         _notifyIconManager.SetTrayIconVisibility(visible: !newCheckedState);
     }
 
@@ -248,20 +256,58 @@ public partial class MainWindow : Window
     private void MainWindow_SizeChanged(object? _, SizeChangedEventArgs __)
     {
         if (WindowState == WindowState.Normal)
-            SettingsManager.FormSize = new Size(Width, Height);
+        {
+            _pendingSize = new Size(Width, Height);
+            _settingsTimer.Stop();
+            _settingsTimer.Start();
+        }
+    }
+
+    private void OnSaveStatusChanged(bool pending)
+    {
+        SettingsSaveWarning.Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
+        _notifyIconManager.SetSettingsSaveWarning(pending);
+        if (pending && !_exitRequested) _settingsTimer.Start();
+    }
+
+    private void FlushSettings()
+    {
+        _settingsTimer.Stop();
+        if (_pendingSize is { } size)
+        {
+            _pendingSize = null;
+            SettingsManager.FormSize = size;
+        }
+        else
+            SettingsManager.RetrySave();
+        if (SettingsSaveWarning.Visibility == Visibility.Visible && !_exitRequested)
+            _settingsTimer.Start();
+    }
+
+    internal void RequestExit()
+    {
+        if (_exitRequested) return;
+        if (CbAutoSaveProfiles.IsChecked == true && !SaveProfiles()) return;
+        _exitRequested = true;
+        Application.Current.Shutdown();
     }
 
     private void MainWindow_Closing(object? _, System.ComponentModel.CancelEventArgs e)
     {
-        // ALT + F4 / App exit
+        if (_exitRequested) return;
         e.Cancel = true;
-        HideWindow(exit: true);
+        HideWindow();
     }
 
     private void OnApplicationExit(object _, ExitEventArgs __)
     {
-        _notifyIconManager.Dispose();
+        var saveProfiles = !_exitRequested && CbAutoSaveProfiles.IsChecked == true;
+        _exitRequested = true;
+        if (saveProfiles) SaveProfiles(exit: true);
+        FlushSettings();
         _hookManager.Dispose();
+        SettingsManager.SaveStatusChanged -= OnSaveStatusChanged;
+        _notifyIconManager.Dispose();
     }
 
     private void TitleBar_MouseLeftButtonDown(object _, MouseButtonEventArgs e)

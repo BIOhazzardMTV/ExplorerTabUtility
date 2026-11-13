@@ -19,6 +19,8 @@ public static class SettingsManager
     private static readonly Lazy<AppSettings> LoadedSettings = new(Store.Load);
     private static AppSettings Settings => LoadedSettings.Value;
     public static event EventHandler<PropertyChangedEventArgs>? StaticPropertyChanged;
+    internal static event Action<bool>? SaveStatusChanged;
+    private static bool _savePending;
 
     internal static void Load() => _ = Settings;
 
@@ -76,10 +78,7 @@ public static class SettingsManager
             {
                 var previous = Settings.HotKeyProfiles;
                 Settings.HotKeyProfiles = value;
-                try
-                {
-                    Store.Write(Settings);
-                }
+                try { WriteSettings(); }
                 catch
                 {
                     Settings.HotKeyProfiles = previous;
@@ -137,12 +136,38 @@ public static class SettingsManager
         set => SaveSettings(() => Settings.RestorePreviousWindows = value);
     }
 
-    public static WindowRecord[]? ClosedWindows
+    internal static WindowRecord[] ClosedWindows => Settings.ClosedWindows ?? [];
+    internal static WindowRecord[] OpenWindows => Settings.OpenWindows ?? [];
+
+    internal static void SaveWindows(WindowRecord[] closed, WindowRecord[] open) => SaveSettings(() =>
     {
-        get => Settings.ClosedWindows;
-        set => SaveSettings(() => Settings.ClosedWindows = value);
+        Settings.ClosedWindows = closed;
+        Settings.OpenWindows = open;
+    });
+
+    internal static void ClearClosedWindows()
+    {
+        lock (SaveLock)
+        {
+            var previous = Settings.ClosedWindows;
+            Settings.ClosedWindows = [];
+            try
+            {
+                Store.Write(Settings, discardOldBackup: true);
+                SetSavePending(false);
+            }
+            catch
+            {
+                Settings.ClosedWindows = previous;
+                throw;
+            }
+        }
     }
 
+    internal static void RetrySave()
+    {
+        if (_savePending) SaveSettings(static () => { });
+    }
 
     private static void SaveSettings(Action update)
     {
@@ -151,13 +176,31 @@ public static class SettingsManager
             lock (SaveLock)
             {
                 update();
-                Store.Write(Settings);
+                WriteSettings();
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             System.Diagnostics.Trace.TraceError($"Failed to save settings: {ex.Message}");
         }
+    }
+
+    private static void WriteSettings()
+    {
+        try { Store.Write(Settings); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetSavePending(true);
+            throw;
+        }
+        SetSavePending(false);
+    }
+
+    private static void SetSavePending(bool value)
+    {
+        if (_savePending == value) return;
+        _savePending = value;
+        SaveStatusChanged?.Invoke(value);
     }
 
 }
@@ -171,7 +214,13 @@ internal sealed class SettingsFile(string path)
     {
         var primary = Read(path);
         _canBackUp = primary != null;
-        return primary ?? Read(_backupPath) ?? new AppSettings();
+        var settings = primary ?? Read(_backupPath) ?? new AppSettings();
+        // Older releases stored the open session in the closed history.
+        var history = settings.ClosedWindows ?? [];
+        settings.OpenWindows = Array.FindAll(settings.OpenWindows ?? Array.FindAll(history, w => w is { Restore: true }),
+            w => w is { Location: not null });
+        settings.ClosedWindows = Array.FindAll(history, w => w is { Restore: false, Location: not null });
+        return settings;
     }
 
     private static AppSettings? Read(string file)
@@ -198,7 +247,7 @@ internal sealed class SettingsFile(string path)
         }
     }
 
-    public void Write(AppSettings settings)
+    public void Write(AppSettings settings, bool discardOldBackup = false)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tempPath = path + ".tmp";
@@ -210,9 +259,23 @@ internal sealed class SettingsFile(string path)
                 stream.Flush(flushToDisk: true);
             }
 
+            // A history clear must also remove the old paths from the recovery copy.
+            if (discardOldBackup)
+            {
+                var cleanBackup = _backupPath + ".tmp";
+                try
+                {
+                    File.Copy(tempPath, cleanBackup, overwrite: true);
+                    if (File.Exists(_backupPath))
+                        File.Replace(cleanBackup, _backupPath, null);
+                    else
+                        File.Move(cleanBackup, _backupPath);
+                }
+                finally { File.Delete(cleanBackup); }
+            }
             // Keep the valid backup if startup had to recover from a damaged primary.
             if (File.Exists(path))
-                File.Replace(tempPath, path, _canBackUp ? _backupPath : null);
+                File.Replace(tempPath, path, _canBackUp && !discardOldBackup ? _backupPath : null);
             else
                 File.Move(tempPath, path);
 
@@ -241,4 +304,5 @@ internal class AppSettings
     public bool SaveClosedWindows { get; set; }
     public bool RestorePreviousWindows { get; set; }
     public WindowRecord[]? ClosedWindows { get; set; }
+    public WindowRecord[]? OpenWindows { get; set; }
 }

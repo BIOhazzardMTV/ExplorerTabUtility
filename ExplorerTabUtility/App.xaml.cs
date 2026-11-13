@@ -3,6 +3,8 @@ using System.IO;
 using System.Windows;
 using System.Threading;
 using System.Windows.Controls;
+using System.Security.Cryptography;
+using System.Text;
 using ExplorerTabUtility.UI.Views;
 using ExplorerTabUtility.Helpers;
 using ExplorerTabUtility.Managers;
@@ -13,6 +15,8 @@ namespace ExplorerTabUtility;
 public partial class App : Application
 {
     private Mutex? _mutex;
+    private EventWaitHandle? _closeRequest;
+    private RegisteredWaitHandle? _closeWait;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -35,7 +39,13 @@ public partial class App : Application
                 return;
             }
 
-            _ = new MainWindow();
+            var window = new MainWindow();
+            using var sha256 = SHA256.Create();
+            var pathBytes = Encoding.Unicode.GetBytes(Helper.GetExecutablePath().ToUpperInvariant());
+            var pathHash = BitConverter.ToString(sha256.ComputeHash(pathBytes)).Replace("-", "");
+            _closeRequest = new EventWaitHandle(false, EventResetMode.AutoReset, Constants.CloseEventPrefix + pathHash);
+            _closeWait = ThreadPool.RegisterWaitForSingleObject(_closeRequest, (_, _) =>
+                Dispatcher.BeginInvoke(window.RequestExit), null, Timeout.Infinite, executeOnlyOnce: false);
             return;
         }
 
@@ -54,6 +64,8 @@ public partial class App : Application
         }
         finally
         {
+            _closeWait?.Unregister(null);
+            _closeRequest?.Dispose();
             _mutex?.Dispose();
         }
     }

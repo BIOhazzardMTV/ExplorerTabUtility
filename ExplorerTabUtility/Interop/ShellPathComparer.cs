@@ -7,7 +7,6 @@ namespace ExplorerTabUtility.Interop;
 public sealed class ShellPathComparer : IDisposable
 {
     private IShellFolder _desktopFolder;
-    private bool _disposed;
 
     public ShellPathComparer()
     {
@@ -135,18 +134,8 @@ public sealed class ShellPathComparer : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-
-        // release the RCW
+        if (_desktopFolder == null) return;
         Marshal.ReleaseComObject(_desktopFolder);
         _desktopFolder = null!;
-
-        _disposed = true;
-        GC.SuppressFinalize(this);
-    }
-
-    ~ShellPathComparer()
-    {
-        Dispose();
     }
 }

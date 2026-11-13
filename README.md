@@ -65,7 +65,8 @@ Say goodbye to cluttered desktops with multiple Explorer windows! Explorer Tab U
 <details>
 <summary>🔄 Restore Previous Windows</summary>
 
-- Automatically restore previously opened windows if File-Explorer restart/crash or system reboot
+- Saves the open Explorer session every few seconds while enabled, including tabs grouped by window
+- Offers to reopen missing tabs after Explorer restarts or the system reboots
 - Configurable via "Restore previous windows" setting
 - Confirmation dialog allows you to choose whether to restore windows on first launch
 
@@ -193,12 +194,12 @@ To upgrade from the .NET 9 build, use the new installer or download a new portab
 <details>
 <summary>⚙️ Preferences</summary>
 
-- **Auto update**: Automatically check for updates on startup to ensure you're always using the latest version
+- **Auto update**: Check the fork's GitHub Releases on startup for a matching build and verify its SHA-256 when downloading it
 - **I have theme issues**: Use an alternative window hiding method that preserves your custom File Explorer theme. Enable this if you experience theme-related issues
 - **Save closed history**: Save recently closed windows for reopening later (ReopenClosed, Tab Search)
 - **Restore previous windows**: Restore previously opened windows after restart or crash
 - **Hide tray icon**: Hide the system tray icon for a cleaner taskbar experience.
-  * You must first configure a hotkey with the `ToggleVisibility` action before enabling this option
+  * Requires an enabled global shortcut with the `ToggleVisibility` action
 
 ![Preferences](https://cdn.jsdelivr.net/gh/w4po/ExplorerTabUtility@master/Assets/Preferences.png)
 </details>
@@ -237,7 +238,7 @@ Each profile contains the following settings:
      - Supports multiple path formats (see Custom Path Navigation section)
 
 2. **Advanced Settings**
-   - Execution Delay: Slider to set delay before action execution
+   - Execution Delay: Wait before each action. Profiles with the same shortcut run in their displayed order.
    - Key Handling: Toggle whether hotkeys are passed to other applications
    - Profile Deletion: Remove unwanted profiles
 
@@ -427,6 +428,7 @@ executable requires the .NET 10 Desktop Runtime.
 
 To run the regression checks, build the solution in Visual Studio or MSBuild
 and run `tests\ExplorerTabUtility.Regression\bin\Release\<framework>\ExplorerTabUtility.Regression.exe`.
+GitHub Actions runs these checks on pull requests and before packaging a release.
 
 Contributions are welcome! Feel free to submit issues and pull requests.
 

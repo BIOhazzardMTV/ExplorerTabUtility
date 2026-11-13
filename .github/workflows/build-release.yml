@@ -1,6 +1,7 @@
 name: Build and Release
 
 on:
+  pull_request:
   push:
     tags:
       - 'v*'
@@ -19,7 +20,31 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
+  regression:
+    runs-on: windows-2025-vs2026
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[18.0,19.0)'
+      - uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 10.0.x
+      - name: Build and run regression checks
+        shell: pwsh
+        run: |
+          msbuild ExplorerTabUtility.sln /restore /m /p:Configuration=Release /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($framework in 'net10.0-windows', 'net481') {
+            & "tests/ExplorerTabUtility.Regression/bin/Release/$framework/ExplorerTabUtility.Regression.exe"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
   build:
+    if: github.event_name != 'pull_request'
+    needs: regression
     runs-on: windows-2025-vs2026
     strategy:
       matrix:
@@ -35,17 +60,6 @@ jobs:
       - uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 10.0.x
-
-      - name: Run regression checks
-        if: matrix.arch == 'x64' && matrix.framework == 'net10.0-windows'
-        shell: pwsh
-        run: |
-          msbuild ExplorerTabUtility.sln /restore /m /p:Configuration=Release /v:minimal
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($framework in 'net10.0-windows', 'net481') {
-            & "tests/ExplorerTabUtility.Regression/bin/Release/$framework/ExplorerTabUtility.Regression.exe"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
 
       - name: Publish and zip portable build
         id: package
